@@ -1,0 +1,266 @@
+<!DOCTYPE html>
+<html lang="fr">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width,initial-scale=1">
+<title>Équipes EPS</title>
+<style>
+:root{--bg:#f4f6f8;--card:#fff;--ink:#1d2733;--mute:#66727f;--line:#dde3e9;--acc:#1f6feb;--acc2:#e8f0fe}
+*{box-sizing:border-box}
+body{margin:0;font-family:system-ui,-apple-system,"Segoe UI",Roboto,sans-serif;background:var(--bg);color:var(--ink)}
+header{background:var(--ink);color:#fff;padding:10px 16px;display:flex;gap:12px;align-items:center;flex-wrap:wrap}
+header h1{font-size:18px;margin:0;flex:1}
+header select{font-size:15px;padding:6px;border-radius:6px;max-width:60vw}
+nav{display:flex;background:#fff;border-bottom:1px solid var(--line)}
+nav button{flex:1;padding:12px;border:0;background:none;font-size:15px;font-weight:600;color:var(--mute);border-bottom:3px solid transparent;cursor:pointer}
+nav button.on{color:var(--acc);border-color:var(--acc)}
+main{max-width:1100px;margin:auto;padding:16px}
+.card{background:var(--card);border:1px solid var(--line);border-radius:10px;padding:14px;margin-bottom:14px}
+h2{font-size:16px;margin:0 0 10px}
+.row{display:flex;gap:8px;flex-wrap:wrap;align-items:center}
+input,select,button,textarea{font:inherit}
+input[type=text],input[type=number],textarea{padding:7px 9px;border:1px solid var(--line);border-radius:6px}
+input.bad{border-color:#b42318;background:#fff1f0}
+.btn{padding:8px 12px;border:1px solid var(--line);border-radius:6px;background:#fff;cursor:pointer;display:inline-block}
+.btn.p{background:var(--acc);color:#fff;border-color:var(--acc)}
+.btn.d{color:#b42318}
+table{width:100%;border-collapse:collapse;font-size:14px}
+th,td{padding:6px;border-bottom:1px solid var(--line);text-align:left;white-space:nowrap}
+th{font-size:12px;color:var(--mute);text-transform:uppercase}
+td input[type=text]{width:72px}
+.rk{display:inline-block;min-width:28px;text-align:center;font-size:12px;background:var(--acc2);color:var(--acc);border-radius:10px;padding:1px 6px;margin-left:4px}
+.teams{display:grid;grid-template-columns:repeat(auto-fill,minmax(200px,1fr));gap:10px}
+.team{margin:0}
+.team h3{margin:0 0 6px;font-size:15px}
+.team ul{margin:0;padding-left:18px;line-height:1.6}
+.mute{color:var(--mute);font-size:13px}
+.hide{display:none}
+tr.abs td{opacity:.45}
+.scroll{overflow-x:auto}
+@media print{header,nav,.noprint,#saisie{display:none!important}body{background:#fff}.card{border:0}.team{border:1px solid #999!important;break-inside:avoid}}
+</style>
+</head>
+<body>
+<header>
+  <h1>Équipes EPS</h1>
+  <select id="cls" onchange="S.current=this.value;save();render()"></select>
+</header>
+<nav>
+  <button data-t="param" onclick="tab='param';render()">Paramètres</button>
+  <button data-t="comp" onclick="tab='comp';render()">Composition des équipes</button>
+</nav>
+<main id="main"></main>
+
+<script>
+const KEY='equipes-eps-v1';
+const EPR=[{k:'passes',l:'Passes',u:'nb'},{k:'catch',l:'Catch',u:'pts'},{k:'lancer',l:'Lancer',u:'m'}];
+const COL=['#d62828','#1f6feb','#2a9d8f','#e9a23b','#7b2cbf','#555','#c2185b','#2e7d32','#0097a7','#6d4c41','#3949ab','#ef6c00'];
+let S=load(), tab='param';
+
+function load(){try{const s=JSON.parse(localStorage.getItem(KEY));if(s&&s.classes)return s}catch(e){}return{classes:[],current:null,nbTeams:5}}
+function save(){try{localStorage.setItem(KEY,JSON.stringify(S))}catch(e){alert('Sauvegarde locale impossible sur ce navigateur.')}}
+const uid=()=>Date.now().toString(36)+Math.random().toString(36).slice(2,7);
+const cur=()=>S.classes.find(c=>c.id===S.current);
+const esc=s=>String(s??'').replace(/[&<>"']/g,c=>({'&':'&amp;','<':'&lt;','>':'&gt;','"':'&quot;',"'":'&#39;'}[c]));
+const sorted=c=>[...c.students].sort((a,b)=>a.nom.localeCompare(b.nom,'fr')||a.prenom.localeCompare(b.prenom,'fr'));
+const ord=n=>n===1?'1er':n+'e';
+
+/* ---------- Classement ---------- */
+function ranks(c){
+  const act=c.students.filter(s=>!s.absent), R={};
+  act.forEach(s=>R[s.id]={});
+  EPR.forEach(e=>{
+    const v=act.filter(s=>s[e.k]!=null).sort((a,b)=>b[e.k]-a[e.k]);
+    v.forEach((s,i)=>{R[s.id][e.k]=(i>0&&v[i-1][e.k]===s[e.k])?R[v[i-1].id][e.k]:i+1});
+  });
+  const done=act.filter(s=>EPR.every(e=>R[s.id][e.k]!=null));
+  done.forEach(s=>{const r=R[s.id];r.tot=EPR.reduce((a,e)=>a+r[e.k],0);r.best=Math.min(...EPR.map(e=>r[e.k]))});
+  done.sort((a,b)=>R[a.id].tot-R[b.id].tot||R[a.id].best-R[b.id].best||a.nom.localeCompare(b.nom,'fr'));
+  done.forEach((s,i)=>R[s.id].g=i+1);
+  return {R,done,act};
+}
+
+/* ---------- Rendu ---------- */
+function render(){
+  if(S.current&&!cur())S.current=S.classes[0]?.id||null;
+  document.getElementById('cls').innerHTML=S.classes.length
+    ?S.classes.map(c=>`<option value="${c.id}"${c.id===S.current?' selected':''}>${esc(c.name)}</option>`).join('')
+    :'<option>— aucune classe —</option>';
+  document.querySelectorAll('nav button').forEach(b=>b.classList.toggle('on',b.dataset.t===tab));
+  document.getElementById('main').innerHTML=tab==='param'?viewParam():viewComp();
+  if(tab==='comp'&&cur())updateRanks();
+}
+
+function viewParam(){
+  const c=cur();
+  let h=`<div class="card"><h2>Classes</h2><div class="row">
+    <input id="newCls" type="text" placeholder="Ex : 5e2" onkeydown="if(event.key==='Enter')addClass()">
+    <button class="btn p" onclick="addClass()">Ajouter la classe</button></div>`;
+  if(c)h+=`<div class="row" style="margin-top:10px"><span class="mute">Classe active : <b>${esc(c.name)}</b> (${c.students.length} élèves)</span>
+    <button class="btn" onclick="renameClass()">Renommer</button><button class="btn d" onclick="delClass()">Supprimer</button></div>`;
+  h+='</div>';
+  if(!c)return h+'<p class="mute">Créez une classe pour commencer.</p>'+viewBackup();
+  h+=`<div class="card"><h2>Ajouter un élève</h2><div class="row">
+    <input id="sNom" type="text" placeholder="Nom" onkeydown="if(event.key==='Enter')document.getElementById('sPre').focus()">
+    <input id="sPre" type="text" placeholder="Prénom" onkeydown="if(event.key==='Enter')addStudent()">
+    <button class="btn p" onclick="addStudent()">Ajouter</button></div></div>`;
+  h+=`<div class="card"><h2>Importer une liste</h2>
+    <p class="mute">Fichier .csv ou .txt, une ligne par élève : « Nom;Prénom » (séparateur ; , ou tabulation) ou « NOM Prénom ». Une ligne d'en-tête « Nom… » est ignorée, les doublons aussi.</p>
+    <input type="file" accept=".csv,.txt,text/plain,text/csv" onchange="importFile(this)">
+    <p class="mute" style="margin-top:12px">…ou collez la liste :</p>
+    <textarea id="paste" rows="4" style="width:100%"></textarea>
+    <div class="row" style="margin-top:6px"><button class="btn" onclick="importPaste()">Importer le texte collé</button></div></div>`;
+  h+=`<div class="card"><h2>Élèves (${c.students.length})</h2>`+(c.students.length
+    ?`<table><tr><th>Nom</th><th>Prénom</th><th></th></tr>${sorted(c).map(s=>`<tr><td>${esc(s.nom)}</td><td>${esc(s.prenom)}</td>
+      <td style="text-align:right"><button class="btn d" onclick="delStudent('${s.id}')">✕</button></td></tr>`).join('')}</table>`
+    :'<p class="mute">Aucun élève.</p>')+'</div>';
+  return h+viewBackup();
+}
+function viewBackup(){
+  return `<div class="card"><h2>Sauvegarde</h2>
+    <p class="mute">Tout est enregistré automatiquement dans ce navigateur. Exportez une sauvegarde pour changer d'appareil ou par sécurité.</p>
+    <div class="row"><button class="btn" onclick="exportJSON()">Exporter (.json)</button>
+    <label class="btn">Restaurer une sauvegarde<input type="file" accept=".json,application/json" class="hide" onchange="importJSON(this)"></label></div></div>`;
+}
+
+function viewComp(){
+  const c=cur();
+  if(!c)return '<p class="mute">Créez d\'abord une classe dans l\'onglet Paramètres.</p>';
+  if(!c.students.length)return '<p class="mute">Ajoutez des élèves dans l\'onglet Paramètres.</p>';
+  let h=`<div class="card" id="saisie"><h2>Épreuves — ${esc(c.name)}</h2><p class="mute" id="prog"></p>
+    <div class="scroll"><table><tr><th>Élève</th><th>Abs.</th>${EPR.map(e=>`<th>${e.l} (${e.u})</th>`).join('')}<th>Total</th><th>Rang</th></tr>`;
+  h+=sorted(c).map(s=>`<tr class="${s.absent?'abs':''}"><td>${esc(s.nom)} ${esc(s.prenom)}</td>
+    <td><input type="checkbox" ${s.absent?'checked':''} onchange="setAbs('${s.id}',this.checked)"></td>
+    ${EPR.map(e=>`<td><input type="text" inputmode="decimal" data-id="${s.id}" data-k="${e.k}" value="${s[e.k]??''}" ${s.absent?'disabled':''}
+      oninput="setVal(this)" onkeydown="nextField(event,this)"><span class="rk" id="r-${s.id}-${e.k}"></span></td>`).join('')}
+    <td id="t-${s.id}"></td><td id="g-${s.id}"></td></tr>`).join('');
+  h+=`</table></div><p class="mute">Chaque épreuve : meilleur score = 1er. Total = somme des 3 rangs (le plus petit total est 1er au général ; égalité départagée par le meilleur rang obtenu). Touche Entrée = élève suivant.</p></div>`;
+  h+=`<div class="card noprint"><h2>Constituer les équipes</h2><div class="row">
+    <label>Nombre d'équipes <input type="number" min="2" max="12" value="${S.nbTeams}" style="width:70px" onchange="S.nbTeams=Math.min(12,Math.max(2,parseInt(this.value)||5));save()"></label>
+    <button class="btn p" onclick="makeTeams()">Constituer les équipes</button>
+    <button class="btn" onclick="resetScores()">Effacer les scores</button></div>
+    <p class="mute">Répartition en serpentin : 1→Éq.1, 2→Éq.2 … 5→Éq.5, 6→Éq.5, 7→Éq.4 … 10→Éq.1, 11→Éq.1, etc.</p></div>`;
+  if(c.teams)h+=viewTeams(c);
+  return h;
+}
+
+function viewTeams(c){
+  const by=id=>c.students.find(s=>s.id===id);
+  return `<div class="card"><div class="row" style="justify-content:space-between"><h2>Équipes — ${esc(c.name)}</h2>
+    <button class="btn noprint" onclick="print()">Imprimer</button></div><div class="teams">${c.teams.map((t,i)=>{
+      const m=t.map(x=>({s:by(x.id),g:x.g})).filter(x=>x.s);
+      const sum=m.reduce((a,x)=>a+x.g,0);
+      return `<div class="team card" style="border-top:4px solid ${COL[i%COL.length]}"><h3>Équipe ${i+1} <span class="mute">(${m.length})</span></h3>
+        <ul>${m.map(x=>`<li>${esc(x.s.prenom)} ${esc(x.s.nom)} <span class="mute">${ord(x.g)}</span></li>`).join('')}</ul>
+        <p class="mute">Somme des rangs : ${sum}</p></div>`}).join('')}</div></div>`;
+}
+
+function updateRanks(){
+  const c=cur(); const {R,done,act}=ranks(c);
+  c.students.forEach(s=>{
+    const r=R[s.id]||{};
+    EPR.forEach(e=>{const el=document.getElementById(`r-${s.id}-${e.k}`);if(el){el.textContent=r[e.k]!=null?ord(r[e.k]):'';el.style.display=r[e.k]!=null?'':'none'}});
+    const t=document.getElementById('t-'+s.id); if(t)t.textContent=r.tot??'';
+    const g=document.getElementById('g-'+s.id); if(g)g.innerHTML=r.g?`<b>${ord(r.g)}</b>`:'';
+  });
+  const abs=c.students.length-act.length, p=document.getElementById('prog');
+  if(p)p.textContent=`${done.length} / ${act.length} élèves présents ont passé les 3 épreuves`+(abs?` · ${abs} absent(s)`:'');
+}
+
+/* ---------- Actions ---------- */
+function addClass(){
+  const i=document.getElementById('newCls'), n=i.value.trim(); if(!n)return;
+  const c={id:uid(),name:n,students:[],teams:null}; S.classes.push(c); S.current=c.id; save(); render();
+}
+function renameClass(){const c=cur(), n=prompt('Nouveau nom :',c.name); if(n&&n.trim()){c.name=n.trim();save();render()}}
+function delClass(){const c=cur(); if(confirm(`Supprimer la classe ${c.name} et toutes ses données ?`)){S.classes=S.classes.filter(x=>x!==c);S.current=S.classes[0]?.id||null;save();render()}}
+function newStudent(nom,prenom){return{id:uid(),nom,prenom,passes:null,catch:null,lancer:null,absent:false}}
+function addList(list){
+  const c=cur(); let n=0;
+  list.forEach(({nom,prenom})=>{
+    if(!nom&&!prenom)return;
+    if(c.students.some(s=>s.nom.toLowerCase()===nom.toLowerCase()&&s.prenom.toLowerCase()===prenom.toLowerCase()))return;
+    c.students.push(newStudent(nom,prenom)); n++;
+  });
+  save(); render(); return n;
+}
+function addStudent(){
+  const a=document.getElementById('sNom'), b=document.getElementById('sPre');
+  if(!a.value.trim()&&!b.value.trim())return;
+  addList([{nom:a.value.trim(),prenom:b.value.trim()}]);
+  document.getElementById('sNom').focus();
+}
+function delStudent(id){const c=cur(), s=c.students.find(x=>x.id===id); if(confirm(`Retirer ${s.prenom} ${s.nom} ?`)){c.students=c.students.filter(x=>x.id!==id);save();render()}}
+
+function parseList(txt){
+  const out=[];
+  txt.replace(/^\uFEFF/,'').split(/\r?\n/).map(l=>l.trim()).filter(Boolean).forEach((l,i)=>{
+    const parts=l.split(/[;\t,]/).map(x=>x.trim().replace(/^"|"$/g,'').trim()).filter(Boolean);
+    if(!parts.length)return;
+    if(i===0&&/^(nom|élève|eleve|name)/i.test(parts[0]))return;
+    let nom,prenom;
+    if(parts.length>=2&&!(/\s/.test(parts[0])&&/\d/.test(parts[1]))){nom=parts[0];prenom=parts[1]}
+    else{
+      const w=parts[0].split(/\s+/);
+      const up=w.filter(x=>x===x.toUpperCase()&&x!==x.toLowerCase());
+      if(up.length&&up.length<w.length){nom=up.join(' ');prenom=w.filter(x=>!up.includes(x)).join(' ')}
+      else{nom=w[0];prenom=w.slice(1).join(' ')}
+    }
+    out.push({nom,prenom});
+  });
+  return out;
+}
+function importFile(inp){
+  const f=inp.files[0]; if(!f)return;
+  const read=enc=>new Promise(r=>{const fr=new FileReader();fr.onload=()=>r(fr.result);fr.readAsText(f,enc)});
+  read('utf-8').then(t=>t.includes('\uFFFD')?read('windows-1252'):t).then(t=>{
+    const n=addList(parseList(t)); alert(`${n} élève(s) importé(s).`);
+  });
+}
+function importPaste(){const t=document.getElementById('paste').value; const n=addList(parseList(t)); alert(`${n} élève(s) importé(s).`)}
+
+function exportJSON(){
+  const a=document.createElement('a');
+  a.href=URL.createObjectURL(new Blob([JSON.stringify(S,null,1)],{type:'application/json'}));
+  a.download=`equipes-eps-${new Date().toISOString().slice(0,10)}.json`; a.click();
+}
+function importJSON(inp){
+  const f=inp.files[0]; if(!f)return;
+  const fr=new FileReader();
+  fr.onload=()=>{try{const d=JSON.parse(fr.result); if(!d.classes)throw 0;
+    if(confirm('Remplacer toutes les données actuelles par cette sauvegarde ?')){S=d;S.nbTeams=S.nbTeams||5;save();render()}}
+    catch(e){alert('Fichier de sauvegarde invalide.')}};
+  fr.readAsText(f);
+}
+
+function setVal(el){
+  const c=cur(), s=c.students.find(x=>x.id===el.dataset.id), v=el.value.trim().replace(',','.');
+  const n=v===''?null:Number(v);
+  el.classList.toggle('bad',v!==''&&!isFinite(n));
+  s[el.dataset.k]=(n==null||!isFinite(n))?null:n;
+  save(); updateRanks();
+}
+function nextField(ev,el){
+  if(ev.key!=='Enter')return; ev.preventDefault();
+  const all=[...document.querySelectorAll(`input[data-k="${el.dataset.k}"]:not([disabled])`)], i=all.indexOf(el);
+  if(all[i+1]){all[i+1].focus();all[i+1].select()} else el.blur();
+}
+function setAbs(id,v){cur().students.find(x=>x.id===id).absent=v; save(); render()}
+function resetScores(){
+  const c=cur(); if(!confirm('Effacer tous les scores et les équipes de cette classe ?'))return;
+  c.students.forEach(s=>{EPR.forEach(e=>s[e.k]=null);s.absent=false}); c.teams=null; save(); render();
+}
+function makeTeams(){
+  const c=cur(), {R,done,act}=ranks(c), n=S.nbTeams||5;
+  if(!done.length)return alert('Aucun élève n\'a encore passé les 3 épreuves.');
+  if(done.length<act.length&&!confirm(`${act.length-done.length} élève(s) présent(s) n'ont pas toutes les épreuves : ils ne seront pas placés. Continuer ?\n(Cochez « Abs. » pour les absents.)`))return;
+  const T=Array.from({length:n},()=>[]);
+  done.forEach((s,i)=>{const r=Math.floor(i/n), p=i%n; T[r%2?n-1-p:p].push({id:s.id,g:R[s.id].g})});
+  c.teams=T; save(); render();
+  setTimeout(()=>document.querySelector('.teams')?.scrollIntoView({behavior:'smooth'}),50);
+}
+
+render();
+</script>
+</body>
+</html>
